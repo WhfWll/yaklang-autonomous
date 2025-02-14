@@ -5,6 +5,8 @@ import (
 	"github.com/yaklang/yaklang/common/utils"
 	"github.com/yaklang/yaklang/common/utils/lowhttp"
 	"golang.org/x/net/html"
+	"net/url"
+	"path"
 	"strings"
 )
 
@@ -18,9 +20,22 @@ func NewHTTPRequest(https bool, req []byte, rsp []byte, urlString string) (bool,
 	} else if strings.HasPrefix(urlString, "javascript:") {
 		return https, nil, utils.Errorf("javascript schema url cannot build http request: %s", urlString)
 	}
+
+	// 解析base URL 增加相對路徑的處理
+	baseURL, _ := lowhttp.ExtractURLFromHTTPRequestRaw(req, https)
+	parsedURL, err := url.Parse(urlString)
+	if err == nil && baseURL != nil {
+		// 处理相对路径
+		parsedURL = baseURL.ResolveReference(parsedURL)
+		// 清理路径
+		parsedURL.Path = path.Clean(parsedURL.Path)
+		urlString = parsedURL.String()
+	}
+
 	reqBytes := lowhttp.UrlToRequestPacket(
 		"GET", urlString, req, https,
 		lowhttp.ExtractCookieJarFromHTTPResponse(rsp)...)
+
 	if utils.IsHttpOrHttpsUrl(urlString) {
 		return strings.HasPrefix(strings.ToLower(urlString), "https://"), reqBytes, nil
 	}

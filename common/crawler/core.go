@@ -594,7 +594,29 @@ func (c *Crawler) handleReqResult(r *Req) {
 
 			// form
 			if s == "form" {
-				return
+				fReq := CreateReqHTMLFormData(r, node)
+				if fReq == nil {
+					return
+				}
+
+				// 将请求体内容读取到字节数组
+				var reqBytes []byte
+				if fReq.request.Body != nil {
+					reqBytes, _ = io.ReadAll(fReq.request.Body)
+					// 重置Body以便后续使用
+					fReq.request.Body = io.NopCloser(bytes.NewReader(reqBytes))
+				}
+
+				// 创建新的请求对象并提交给爬虫
+				// 序列化请求为原始字节
+				var rawRequest []byte
+				if fReq.request != nil {
+					rawRequest, _ = utils.HttpDumpWithBody(fReq.request, true)
+				}
+				/*if fReq.request != nil && fReq.request.URL != nil {
+					fmt.Println(fmt.Sprintf("提交表单请求到: %s", fReq.request.URL.String()))
+				}*/
+				submit(fReq.IsHttps(), rawRequest)
 			}
 
 			// meta
@@ -676,6 +698,17 @@ func (c *Crawler) handleReqResult(r *Req) {
 	}
 	utils.CallWithTimeout(30, func() {
 		HandleJSGetNewRequest(r.https, r.requestRaw, fullJSCode.String(), func(b bool, i []byte) {
+			// 添加JS生成的URL验证
+			// 使用正确的lowhttp方法处理URL
+			if req, err := lowhttp.ParseBytesToHttpRequest(i); err == nil {
+				urlIns := req.URL
+				urlIns.Path = path.Clean(urlIns.Path)
+				// 重建请求
+				req.URL = urlIns
+				var buf bytes.Buffer
+				req.Write(&buf)
+				i = buf.Bytes()
+			}
 			submit(b, i)
 		})
 	})
@@ -906,6 +939,12 @@ func createReqFromUrlEx(preqRequest *Req, method, u string, body io.Reader, c *C
 
 	reqBytes, _ := utils.HttpDumpWithBody(r, true)
 	depth := 0
+
+	// 规范化URL路径
+	if parsedURL, err := url.Parse(u); err == nil {
+		parsedURL.Path = path.Clean(parsedURL.Path)
+		u = parsedURL.String()
+	}
 	if preqRequest != nil {
 		depth = preqRequest.depth + 1
 	}

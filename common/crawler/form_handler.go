@@ -3,7 +3,10 @@ package crawler
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -316,4 +319,179 @@ func getHTMLNodeChildren(r *html.Node) []*html.Node {
 		}
 	}
 	return children
+}
+
+// CreateReqHTMLFormData 根据html 的 表单信息 创建新的请求
+func CreateReqHTMLFormData(r *Req, node *html.Node) *Req {
+	method := "GET"
+	if m := getAttr(node, "method"); m != "" {
+		method = strings.ToUpper(m)
+	}
+	action := getAttr(node, "action")
+	formUrl := r.AbsoluteURL(action)
+	if formUrl == "" {
+		formUrl = r.Url()
+		//return nil
+	}
+	// 收集表单参数
+	var params []string
+	nodeWalker(node, func(n *html.Node) {
+		if n.Type == html.ElementNode && (n.Data == "input" || n.Data == "textarea" || n.Data == "select") {
+			name := getAttr(n, "name")
+			if name == "" {
+				return
+			}
+			value := getAttr(n, "value")
+			if n.Data == "select" {
+				if option := n.FirstChild; option != nil {
+					value = getAttr(option, "value")
+				}
+			}
+			// Generate default value if empty based on route info
+			if value == "" {
+				value = generateDefaultParamValue(name, r.Url())
+			}
+			params = append(params, fmt.Sprintf("%s=%s", name, url.QueryEscape(value)))
+		}
+	})
+	// 根据请求方法处理参数
+	var body io.Reader
+	contentType := "application/x-www-form-urlencoded"
+	// 拼接参数
+	paramStr := strings.Join(params, "&")
+	if method == "GET" {
+		// GET请求将参数拼接到URL
+		if strings.Contains(formUrl, "?") {
+			formUrl += "&" + paramStr
+		} else {
+			formUrl += "?" + paramStr
+		}
+		body = http.NoBody
+	} else {
+		// POST请求处理不同编码类型
+		if enctype := getAttr(node, "enctype"); enctype != "" {
+			contentType = enctype
+			if strings.Contains(enctype, "multipart/form-data") {
+				body = createMultipartBody(params)
+			} else {
+				body = strings.NewReader(paramStr)
+			}
+		} else {
+			body = strings.NewReader(paramStr)
+		}
+	}
+
+	// 创建并提交请求
+	fReq, err := createReqFromUrlEx(r, method, formUrl, body, nil)
+	if err != nil {
+		log.Errorf("create form request failed: %s", err)
+		return nil
+	}
+	fReq.isForm = true
+	fReq.request.Header.Set("Content-Type", contentType)
+	fReq.request.Header.Set("Referer", r.request.URL.String())
+
+	lowerBody := strings.ToLower(utils.InterfaceToString(body)) + strings.ToLower(formUrl)
+	fReq.maybeLoginForm = utils.MatchAnyOfSubString(
+		lowerBody,
+		"user", "name", "mail", "id", "xingming", "phone", "unique",
+	) && utils.MatchAnyOfSubString(
+		lowerBody,
+		"pass", "word", "mima", "code", "secret", "key", "passwd", "pw", "pwd", "pd",
+	)
+	fReq.maybeUploadForm = utils.MatchAllOfRegexp(contentType, `application\/form-data`)
+	fReq.depth = r.depth
+	return fReq
+}
+
+// 定义辅助函数
+func getAttr(n *html.Node, key string) string {
+	for _, attr := range n.Attr {
+		if attr.Key == key {
+			return attr.Val
+		}
+	}
+	return ""
+}
+
+func nodeWalker(n *html.Node, f func(*html.Node)) {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		f(c)
+		nodeWalker(c, f)
+	}
+}
+
+func createMultipartBody(params []string) io.Reader {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	for _, param := range params {
+		parts := strings.SplitN(param, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		writer.WriteField(parts[0], parts[1])
+	}
+	writer.Close()
+	return &buf
+}
+
+// generateDefaultParamValue creates context-aware default values based on parameter name and route
+func generateDefaultParamValue(name, path string) string {
+	pathParts := strings.Split(path, "/")
+	var numericParts []string
+	for _, part := range pathParts {
+		if _, err := strconv.Atoi(part); err == nil {
+			numericParts = append(numericParts, part)
+		}
+	}
+
+	// 从路径中提取数字参数
+	if len(numericParts) > 0 {
+		return numericParts[0]
+	}
+
+	// 常见参数模式匹配
+	keymap := map[string]string{
+		"id":     "1",
+		"number": "1",
+		"page":   "1",
+		"offset": "1",
+		"order":  "1",
+		"limit":  "1",
+		"filter": "1",
+		"action": "list",
+	}
+
+	if _, ok := keymap[name]; ok {
+		return keymap[name]
+	}
+
+	// 用户名密码相关参数
+	for _, u := range usernameKeyword {
+		if utils.IContains(name, u) && len(name) > 2 {
+			return "admin"
+		}
+		keymap[u] = "admin"
+	}
+	for _, p := range passwordKeyword {
+		if utils.IContains(name, p) && len(name) > 1 {
+			return "123456"
+		}
+		keymap[p] = "123456"
+	}
+
+	// CSRF token处理
+	if utils.MatchAnyOfSubString(name, csrftokenKeyword...) {
+		return utils.RandStringBytes(16)
+	}
+
+	// 匹配预定义参数
+	for key, value := range keymap {
+		if utils.IContains(name, key) {
+			return value
+		}
+	}
+
+	// 默认生成随机值
+	return fmt.Sprintf("crawler-%s", utils.RandStringBytes(5))
 }

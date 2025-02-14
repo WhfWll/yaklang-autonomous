@@ -59,7 +59,8 @@ func (c *Config) init() {
 	c.maxCountOfRequest = 1000
 	c.disallowSuffix = ExcludedSuffix
 	c.disallowMIMEType = ExcludedMIME
-	c.startFromParentPath = true
+	//c.startFromParentPath = true
+	c.startFromParentPath = false
 	c.maxRetryTimes = 3
 	c.allowMethod = []string{"GET", "POST"}
 	c.allowUrlRegexp = make(map[string]*regexp.Regexp)
