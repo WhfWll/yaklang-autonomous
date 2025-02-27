@@ -607,6 +607,23 @@ func (c *Crawler) handleReqResult(r *Req) {
 					fReq.request.Body = io.NopCloser(bytes.NewReader(reqBytes))
 				}
 
+				// 对URL中的参数进行去重
+				if fReq.request != nil && fReq.request.URL != nil {
+					query := fReq.request.URL.Query()
+					// 创建一个新的url.Values来存储去重后的参数
+					newQuery := make(url.Values)
+					
+					// 遍历所有参数，只保留每个参数的第一个值
+					for key, values := range query {
+						if len(values) > 0 {
+							newQuery[key] = []string{values[0]}
+						}
+					}
+					
+					// 更新URL的查询参数
+					fReq.request.URL.RawQuery = newQuery.Encode()
+				}
+
 				// 创建新的请求对象并提交给爬虫
 				// 序列化请求为原始字节
 				var rawRequest []byte
