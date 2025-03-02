@@ -2,15 +2,34 @@ package crawler
 
 import (
 	"github.com/stretchr/testify/require"
+	"strings"
 	"testing"
 )
 
 func TestCrawler_Run(t *testing.T) {
 	crawler, err := NewCrawler(
-		"http://127.0.0.1:8787/misc/response/javascript-ssa-ir-basic/basic-fetch.html",
+		"http://192.168.3.4:8777/index.php",
 		WithOnRequest(func(req *Req) {
-			println(req.Url())
+			// 增加更详细的日志输出
+			println("请求URL: %s, 方法: %s, 深度: %d", req.Url(), req.request.Method, req.depth)
+			// 打印Cookie信息
+			if len(req.request.Cookies()) > 0 {
+				var cookies []string
+				for _, cookie := range req.request.Cookies() {
+					cookies = append(cookies, cookie.String())
+				}
+				println("请求携带的Cookie: %s", strings.Join(cookies, "; "))
+			}
+			// 检查是否有重定向
+			if req.response != nil && (req.response.StatusCode == 301 || req.response.StatusCode == 302) {
+				println("检测到重定向: %s -> %s", req.Url(), req.response.Header.Get("Location"))
+			}
 		}),
+		WithProxy("http://192.168.22.1:8888"),
+		WithFixedCookie("PHPSESSID", "pfjrmm42ofoagssvovc2mlpm05"),
+		WithFixedCookie("security", "low"),
+		WithMaxRedirectTimes(0),
+		// 启用调试日志
 	)
 	if err != nil {
 		t.Fatal(err)

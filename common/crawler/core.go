@@ -612,14 +612,14 @@ func (c *Crawler) handleReqResult(r *Req) {
 					query := fReq.request.URL.Query()
 					// 创建一个新的url.Values来存储去重后的参数
 					newQuery := make(url.Values)
-					
+
 					// 遍历所有参数，只保留每个参数的第一个值
 					for key, values := range query {
 						if len(values) > 0 {
 							newQuery[key] = []string{values[0]}
 						}
 					}
-					
+
 					// 更新URL的查询参数
 					fReq.request.URL.RawQuery = newQuery.Encode()
 				}
@@ -984,12 +984,12 @@ func (c *Crawler) execReq(r *Req) {
 
 	// config opts
 	opts := c.config.GetLowhttpConfig()
-	opts = append(opts, lowhttp.WithHttps(r.IsHttps()), lowhttp.WithPacketBytes(r.requestRaw), lowhttp.WithRuntimeId(c.config.runtimeID))
-	if c.config.onLogin != nil && r.IsLoginForm() && r.IsForm() {
-		c.loginOnce.Do(func() {
-			c.config.onLogin(r)
-		})
-	}
+	// 添加重定向处理选项，确保在重定向时保留 Cookie
+	opts = append(opts,
+		lowhttp.WithHttps(r.IsHttps()),
+		lowhttp.WithPacketBytes(r.requestRaw),
+		lowhttp.WithRuntimeId(c.config.runtimeID),
+	)
 
 	lowRspIns, err := lowhttp.HTTP(opts...)
 	if err != nil {

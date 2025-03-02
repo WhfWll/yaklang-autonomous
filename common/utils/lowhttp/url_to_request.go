@@ -66,53 +66,71 @@ func UrlToRequestPacket(method string, u string, originRequest []byte, originReq
 }
 
 func UrlToRequestPacketEx(method string, targetURL string, originRequest []byte, https bool, statusCode int, cookies ...*http.Cookie) ([]byte, error) {
-	var raw []byte
-
-	// 303/302
-	// 302在规范下也应该保留请求体和请求方法，但是实际上大部分浏览器都会改为GET请求，所以我们就不保留
-	is302Or303 := statusCode == http.StatusSeeOther || statusCode == http.StatusFound
-	if is302Or303 {
-		method = http.MethodGet
-	}
-	var (
-		originReqIns *http.Request
-		err          error
-	)
-	if len(originRequest) > 0 {
-		originReqIns, err = ParseBytesToHttpRequest(originRequest)
-		if err != nil && err != io.EOF {
-			return nil, utils.Wrap(err, "parse bytes to http request error")
-		}
-		if originReqIns == nil {
-			return nil, utils.Error("parse bytes to http request error, empty request")
-		}
-		if originReqIns.URL != nil {
-			if https {
-				// fix https externally
-				originReqIns.URL.Scheme = "https"
-			} else if originReqIns.URL.Scheme == "" {
-				originReqIns.URL.Scheme = "http"
-			}
-		}
-		if method == "" {
-			method = originReqIns.Method
-		}
-	}
-
-	raw = NewRequestPacketFromMethod(method, targetURL, originRequest, originReqIns, https, cookies...)
-	if is302Or303 {
-		raw = ReplaceHTTPPacketBodyFast(raw, nil)
-		raw = DeleteHTTPPacketHeader(raw, "Content-Length")
-		raw = DeleteHTTPPacketHeader(raw, "Transfer-Encoding")
-		raw = DeleteHTTPPacketHeader(raw, "Content-Type")
-	}
-	if originReqIns != nil && originReqIns.URL != nil {
-		raw = ReplaceHTTPPacketHeader(raw, "Referer", originReqIns.URL.String())
-	}
-
-	return FixHTTPRequest(raw), nil
+    var raw []byte
+    
+    // 303/302
+    // 302在规范下也应该保留请求体和请求方法，但是实际上大部分浏览器都会改为GET请求，所以我们就不保留
+    is302Or303 := statusCode == http.StatusSeeOther || statusCode == http.StatusFound
+    if is302Or303 {
+        method = http.MethodGet
+    }
+    var (
+        originReqIns *http.Request
+        err          error
+    )
+    if len(originRequest) > 0 {
+        originReqIns, err = ParseBytesToHttpRequest(originRequest)
+        if err != nil && err != io.EOF {
+            return nil, utils.Wrap(err, "parse bytes to http request error")
+        }
+        if originReqIns == nil {
+            return nil, utils.Error("parse bytes to http request error, empty request")
+        }
+        if originReqIns.URL != nil {
+            if https {
+                // fix https externally
+                originReqIns.URL.Scheme = "https"
+            } else if originReqIns.URL.Scheme == "" {
+                originReqIns.URL.Scheme = "http"
+            }
+        }
+        if method == "" {
+            method = originReqIns.Method
+        }
+    }
+    // 在调用 NewRequestPacketFromMethod 之前，获取并去重 cookies
+    var allCookies []*http.Cookie
+    cookieMap := make(map[string]*http.Cookie)
+    // 首先处理原始请求中的 cookies
+    if originReqIns != nil {
+        originalCookies := originReqIns.Cookies()
+        for _, cookie := range originalCookies {
+            cookieMap[cookie.Name] = cookie
+        }
+    }
+    // 然后处理新传入的 cookies，如果有相同名称的 cookie 则覆盖
+    for _, cookie := range cookies {
+        cookieMap[cookie.Name] = cookie
+    }
+    // 将去重后的 cookies 转换为数组
+    for _, cookie := range cookieMap {
+        allCookies = append(allCookies, cookie)
+    }
+    // 使用去重后的 cookies 创建新请求
+    raw = NewRequestPacketFromMethod(method, targetURL, originRequest, originReqIns, https, allCookies...)
+    
+    if is302Or303 {
+        raw = ReplaceHTTPPacketBodyFast(raw, nil)
+        raw = DeleteHTTPPacketHeader(raw, "Content-Length")
+        raw = DeleteHTTPPacketHeader(raw, "Transfer-Encoding")
+        raw = DeleteHTTPPacketHeader(raw, "Content-Type")
+    }
+    if originReqIns != nil && originReqIns.URL != nil {
+        raw = ReplaceHTTPPacketHeader(raw, "Referer", originReqIns.URL.String())
+    }
+    
+    return FixHTTPRequest(raw), nil
 }
-
 func UrlToHTTPRequest(text string) ([]byte, error) {
 	var r *http.Request
 	if !(strings.HasPrefix(text, "http://") || strings.HasPrefix(text, "https://")) {
