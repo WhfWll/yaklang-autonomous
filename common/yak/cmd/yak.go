@@ -150,10 +150,10 @@ func init() {
 
 `, consts.GetYakVersion(), "yaklang.io")
 	} else {
-		err := initializeDatabase("", "")
-		if err != nil {
-			log.Warnf("initialize database failed: %s", err)
-		}
+		//err := initializeDatabase("", "")
+		//if err != nil {
+		//	log.Warnf("initialize database failed: %s", err)
+		//}
 	}
 	yaklib.SetEngineInterface(yak.NewScriptEngine(1000))
 	yak.SetNaslExports(antlr4nasl.Exports)
